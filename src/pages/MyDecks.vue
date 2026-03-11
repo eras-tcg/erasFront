@@ -6,11 +6,35 @@ import { useAuthStore } from '@/store/login'
 
 const auth   = useAuthStore()
 const router = useRouter()
+const canManageDecks = computed(() => auth.can('manage_decks'))
 
 const decks    = ref([])
 const cardMap  = ref({})   // id → image_url
 const loading  = ref(true)
 const deleting = ref(null) // deck id being deleted
+
+// ── Sort ──────────────────────────────────────────────────────────────────────
+const sortKey = ref('name')   // 'name' | 'username' | 'antiqueness'
+const sortDir = ref('asc')      // 'asc' | 'desc'
+
+const SORT_OPTIONS = [
+  { value: 'name',     label: 'Nombre' },
+  { value: 'username',     label: 'Nombre usuario' },
+  { value: 'antiqueness',    label: 'Antiguedad' },
+]
+
+function sortVal(c) {
+  switch (sortKey.value) {
+    case 'name': return (c.deckName ?? '').toLowerCase()
+    case 'username': return (c.username ?? '').toLowerCase()
+    case 'antiqueness': return c.createdAt ?? ''
+    default:         return c.number         ?? Infinity
+  }
+}
+
+const toggleSortDir = () => { sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc' }
+
+
 
 const deckCoverUrl = deck =>
   deck.deckImage ? (cardMap.value[deck.deckImage] ?? null) : null
@@ -40,11 +64,50 @@ const deleteDeck = async deck => {
   } catch (e) { console.error('Error deleting deck', e) }
   finally { deleting.value = null }
 }
+
+const visibleDecks = computed(() => {
+  const dir = sortDir.value === 'asc' ? 1 : -1
+
+  return decks.value
+    .filter(d => !d.privateDeck || d.userId === auth.userId || canManageDecks.value)
+    .sort((a, b) => {
+      const va = sortVal(a)
+      const vb = sortVal(b)
+
+      if (va == null) return 1
+      if (vb == null) return -1
+
+      if (va > vb) return dir
+      if (va < vb) return -dir
+      return 0
+    })
+})
 </script>
 
 <template>
   <div class="my-decks-page">
-    <h2 class="md-title">Mis mazos</h2>
+    <div class="md-header">
+      <h2 class="md-title">Mis Mazos</h2>
+
+      <div class="sort-controls">
+
+        <div class="sort-row">
+          <select v-model="sortKey" class="filter-select sort-select">
+            <option v-for="o in SORT_OPTIONS" :key="o.value" :value="o.value">
+              {{ o.label }}
+            </option>
+          </select>
+
+          <button
+            class="btn-sort-dir"
+            @click="toggleSortDir"
+            :title="sortDir === 'asc' ? 'Ascendente' : 'Descendente'"
+          >
+            <i :class="sortDir === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down'"></i>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="loading" class="md-loading">
       <div class="spinner-border text-light" role="status"></div>
@@ -53,7 +116,7 @@ const deleteDeck = async deck => {
     <div v-else-if="decks.length === 0" class="md-empty">
       <i class="bi bi-collection md-empty-icon"></i>
       <p>No tienes mazos guardados.</p>
-      <router-link to="/deck-builder" class="btn-filled">Crear mazo</router-link>
+      <router-link v-if="canManageDecks" to="/deck-builder" class="btn-filled">Crear mazo</router-link>
     </div>
 
     <div v-else class="md-grid">
@@ -70,7 +133,7 @@ const deleteDeck = async deck => {
         <!-- Info -->
         <div class="md-info">
           <div class="md-name">{{ deck.deckName }}</div>
-          <div class="md-actions">
+          <div class="md-actions" v-if="canManageDecks">
             <button class="md-btn md-btn-edit" @click="editDeck(deck)" title="Editar mazo">
               <i class="bi bi-pencil-fill"></i> Editar
             </button>
@@ -86,7 +149,7 @@ const deleteDeck = async deck => {
     </div>
 
     <!-- FAB to create new deck -->
-    <router-link to="/deck-builder" class="md-fab" title="Nuevo mazo">
+    <router-link v-if="canManageDecks" to="/deck-builder" class="md-fab" title="Nuevo mazo">
       <i class="bi bi-plus-lg"></i>
     </router-link>
   </div>
@@ -178,11 +241,20 @@ const deleteDeck = async deck => {
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-author {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
   margin-bottom: 0.5rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .md-actions {
   display: flex;
   gap: 0.5rem;
@@ -251,5 +323,58 @@ const deleteDeck = async deck => {
 .md-fab:hover {
   background: #5c6bc0;
   transform: scale(1.08);
+}
+
+
+/* Sort */
+.filter-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.filter-group--row { flex-direction: row; align-items: center; gap: 0.5rem; }
+.filter-group--grow { flex: 1 1 140px; }
+.filter-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.5); font-weight: 600; }
+.filter-label.muted { opacity: 0.3; }
+.filter-select, .filter-input {
+  background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 6px;
+  color: #e0e0e0; padding: 0.38rem 0.6rem; font-size: 0.88rem; outline: none; min-width: 0; width: 100%; box-sizing: border-box;
+}
+.filter-select, .filter-input {
+  background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 6px;
+  color: #e0e0e0; padding: 0.38rem 0.6rem; font-size: 0.88rem; outline: none; min-width: 0; width: 100%; box-sizing: border-box;
+}
+.filter-select:focus, .filter-input:focus { border-color: #3f51b5; }
+.filter-select option { background: #1e1e1e; }
+.filter-input::placeholder { color: rgba(255,255,255,0.3); }
+.filter-check { width: 16px; height: 16px; cursor: pointer; accent-color: #3f51b5; }
+.sort-row { display: flex; gap: 0.4rem; align-items: center; }
+.sort-select {
+  width: auto;
+  min-width: 140px;
+}
+.btn-sort-dir {
+  flex-shrink: 0; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 6px;
+  color: #e0e0e0; padding: 0.38rem 0.55rem; font-size: 1rem; cursor: pointer; line-height: 1;
+}
+.btn-sort-dir:hover { border-color: #3f51b5; color: #7986cb; }
+.filter-chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.filter-chips--colors { flex-wrap: nowrap; }
+.chip--color { padding: 0.2rem 0.45rem; font-size: 0.72rem; flex: 1; text-align: center; }
+
+
+.md-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 </style>
