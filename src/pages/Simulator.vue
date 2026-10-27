@@ -12,7 +12,7 @@ const auth       = useAuthStore()
 const decksStore = useDecksStore()
 const game       = useGameStore()
 
-if (!auth.isAuthenticated) router.replace('/login')
+if (!auth.isAuthenticated) router.replace({ path: '/login', query: { redirect: route.fullPath } })
 
 const roomId          = ref(route.params.roomId || null)
 const selectedDeck    = ref(null)

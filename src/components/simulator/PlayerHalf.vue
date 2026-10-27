@@ -21,8 +21,16 @@ const targetPlayerId = computed(() =>
   props.isOpponent ? (game.opponentState?.userId ?? null) : null
 )
 
-function onEffectYes() { game.drawCard(); effectSummonPending.value = false }
-function onEffectNo()  { effectSummonPending.value = false }
+function onEffectYes() {
+  const p = effectSummonPending.value
+  game.resolveEffectSummon(p.instanceId, p.fromZone, true)
+  effectSummonPending.value = null
+}
+function onEffectNo() {
+  const p = effectSummonPending.value
+  game.resolveEffectSummon(p.instanceId, p.fromZone, false)
+  effectSummonPending.value = null
+}
 </script>
 
 <template>

@@ -148,7 +148,7 @@ const zoneTargetId = computed(() =>
 const isZoneTargeted = computed(() => game.targetedInstanceId === zoneTargetId.value)
 
 // ── Actions ──────────────────────────────────────────────────────────────────
-function viewStack()   { closeCtx(); hovering.value = false; showModal.value = true }
+function viewStack()   { closeCtx(); hovering.value = false; showModal.value = true; game.viewLifeStack() }
 function heal()        { closeCtx(); game.lifeHeal() }
 function shuffleLife() { closeCtx(); hovering.value = false; game.lifeShuffle() }
 function allDown()     { closeCtx(); hovering.value = false; game.lifeAllDown() }
