@@ -15,6 +15,31 @@ const localCards = ref([])
 const dragIndex  = ref(null)
 const overIndex  = ref(null)
 
+// ── Hover preview (mouse-follow zoom, mirrors DecklistModal/ZoneModal) ────────
+const hoveredCard = ref(null)
+const previewPos  = ref({ top: 0, left: 0 })
+const PREVIEW_W = 240
+const PREVIEW_H = 336
+
+// Position is set once on mouseenter only (no mousemove tracking) — a
+// continuous mousemove listener on this same draggable element fights the
+// browser's native drag-gesture detection and silently kills dragstart.
+function onCardEnter(card, e) {
+  if (card.faceDown || !card.imageUrl) return
+  hoveredCard.value = card
+  updatePreviewPos(e)
+}
+function onCardLeave() { hoveredCard.value = null }
+
+function updatePreviewPos(e) {
+  let left = e.clientX + 16
+  let top  = e.clientY - PREVIEW_H / 2
+  if (left + PREVIEW_W > window.innerWidth - 8)  left = e.clientX - PREVIEW_W - 16
+  if (top < 8)                                    top  = 8
+  if (top + PREVIEW_H > window.innerHeight - 8)  top  = window.innerHeight - PREVIEW_H - 8
+  previewPos.value = { top, left }
+}
+
 // Only snapshot the deck when the modal opens (not on every deck change)
 watch(
   () => props.visible,
@@ -157,6 +182,8 @@ function returnCards(position, shuffle) {
               title="Arrastra al tablero"
               @dragstart="onThumbDragStart(card, $event)"
               @dragend="onThumbDragEnd"
+              @mouseenter="onCardEnter(card, $event)"
+              @mouseleave="onCardLeave"
             >
               <img v-if="!card.faceDown && card.imageUrl" :src="card.imageUrl" class="dp-img" />
               <div v-else class="dp-back" />
@@ -189,6 +216,15 @@ function returnCards(position, shuffle) {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Hover preview — mouse-follow zoom -->
+    <div
+      v-if="hoveredCard && hoveredCard.imageUrl"
+      class="dp-hover-preview"
+      :style="{ top: previewPos.top + 'px', left: previewPos.left + 'px' }"
+    >
+      <img :src="hoveredCard.imageUrl" class="dp-hover-img" alt="" />
     </div>
   </Teleport>
 </template>
@@ -330,4 +366,23 @@ function returnCards(position, shuffle) {
   cursor: pointer; transition: background 0.1s; white-space: nowrap; text-align: center;
 }
 .dp-ret-btn:hover { background: rgba(99,102,241,0.45); color: #fff; }
+
+/* Hover preview — mouse-follow zoom */
+:global(.dp-hover-preview) {
+  position: fixed;
+  z-index: 1500;
+  width: 240px;
+  height: 336px;
+  border-radius: 7px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.85);
+  border: 1px solid rgba(255,255,255,0.2);
+  pointer-events: none;
+}
+:global(.dp-hover-img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 </style>

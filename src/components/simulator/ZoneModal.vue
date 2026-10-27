@@ -21,11 +21,49 @@ const draggingOut = ref(false)   // true while dragging a card OUT to a board zo
 const selectedIds = ref(new Set())
 const peekCardUrl = ref(null)
 
+// ── Hover preview (mouse-follow zoom, mirrors DecklistModal) ──────────────────
+const hoveredCard = ref(null)
+const previewPos  = ref({ top: 0, left: 0 })
+const PREVIEW_W = 240
+const PREVIEW_H = 336
+
+// Position is set once on mouseenter only (no mousemove tracking) — a
+// continuous mousemove listener on this same draggable element fights the
+// browser's native drag-gesture detection and silently kills dragstart.
+function onCardEnter(card, e) {
+  if (card.faceDown || !card.imageUrl) return
+  hoveredCard.value = card
+  updatePreviewPos(e)
+}
+function onCardLeave() { hoveredCard.value = null }
+
+function updatePreviewPos(e) {
+  let left = e.clientX + 16
+  let top  = e.clientY - PREVIEW_H / 2
+  if (left + PREVIEW_W > window.innerWidth - 8)  left = e.clientX - PREVIEW_W - 16
+  if (top < 8)                                    top  = 8
+  if (top + PREVIEW_H > window.innerHeight - 8)  top  = window.innerHeight - PREVIEW_H - 8
+  previewPos.value = { top, left }
+}
+
 watch(
   () => [props.visible, props.cards],
   () => {
-    if (props.visible && dragIndex.value === null) {
-      localCards.value = props.cards.map(c => ({ ...c }))
+    // A "global" operation (e.g. shuffle-into-deck from the whole tribute/
+    // discard pile) can empty this zone server-side while the modal is open
+    // mid-drag. If we only resync when dragIndex is null, localCards is left
+    // stale — pointing at cards that no longer exist — and the next click
+    // (flip/move/bulk action) on one of those rows throws. So always resync
+    // when the zone is now empty, regardless of drag state.
+    if (props.visible && (dragIndex.value === null || props.cards.length === 0)) {
+      // Defensive filter: a corrupted/null slot in the underlying zone array
+      // must not crash the whole modal (":key=card.instanceId" would throw).
+      localCards.value = props.cards.filter(Boolean).map(c => ({ ...c }))
+      if (props.cards.length === 0) {
+        dragIndex.value = null
+        overIndex.value = null
+        selectedIds.value = new Set()
+      }
     }
   },
   { immediate: true, deep: true },
@@ -119,6 +157,19 @@ function flipCard(card) {
 
 function peekAt(card) {
   peekCardUrl.value = card.imageUrl
+  if (props.zone === 'lifeStack') {
+    game.viewLifeCard(card.instanceId)
+  }
+}
+
+// ── Delete a bugged/unwanted card entirely ───────────────────────────────────
+function deleteCard(card) {
+  if (!confirm('¿Eliminar esta carta del juego por completo? No se puede deshacer.')) return
+  game.removeCard(card.instanceId, props.zone, props.targetPlayerId)
+  localCards.value = localCards.value.filter(c => c.instanceId !== card.instanceId)
+  const set = new Set(selectedIds.value)
+  set.delete(card.instanceId)
+  selectedIds.value = set
 }
 
 // ── Move via button ──────────────────────────────────────────────────────────
@@ -155,13 +206,26 @@ function shuffleArray(arr) {
 }
 
 function bulkMoveTo(toZone) {
-  const needsRandom = toZone === 'deck' || toZone === 'lifeStack'
+  const needsRandom = toZone === 'lifeStack'
   let ids = [...selectedIds.value]
   if (needsRandom) ids = shuffleArray(ids)
   ids.forEach(id => {
     const card = localCards.value.find(c => c.instanceId === id)
     if (card) game.moveCard(card.instanceId, props.zone, toZone, undefined, undefined, undefined, props.targetPlayerId)
   })
+  localCards.value = localCards.value.filter(c => !selectedIds.value.has(c.instanceId))
+  selectedIds.value = new Set()
+}
+
+// Bulk "→ Mazo" is its own atomic server action (not a loop of individual
+// MOVE_CARD calls) so the whole batch lands in one go, in one order — either
+// shuffled or exactly as shown in this list (not click/selection order).
+function bulkToDeckBottom(random) {
+  const ids = localCards.value
+    .filter(c => selectedIds.value.has(c.instanceId))
+    .map(c => c.instanceId)
+  if (ids.length === 0) return
+  game.bulkSendToDeckBottom(props.zone, ids, random)
   localCards.value = localCards.value.filter(c => !selectedIds.value.has(c.instanceId))
   selectedIds.value = new Set()
 }
@@ -178,6 +242,10 @@ const ALL_ZONES = [
 const ZONES = computed(() =>
   props.isOpponent ? ALL_ZONES.filter(z => z.key === 'field') : ALL_ZONES
 )
+
+// Same as ZONES but without 'deck' — the bulk bar splits deck into two
+// dedicated order-aware buttons instead (see bulkToDeckBottom).
+const BULK_ZONES = computed(() => ZONES.value.filter(z => z.key !== 'deck'))
 </script>
 
 <template>
@@ -204,12 +272,22 @@ const ZONES = computed(() =>
         <div v-if="!readOnly && selectedIds.size > 0" class="zm-bulk-bar">
           <span class="zm-bulk-count">{{ selectedIds.size }} seleccionadas</span>
           <button
-            v-for="z in ZONES"
+            v-for="z in BULK_ZONES"
             :key="z.key"
             class="zm-bulk-btn"
             :disabled="z.key === zone"
             @click="bulkMoveTo(z.key)"
           >→ {{ z.label }}</button>
+          <button
+            v-if="zone !== 'deck'"
+            class="zm-bulk-btn"
+            @click="bulkToDeckBottom(false)"
+          >→ Mazo (orden)</button>
+          <button
+            v-if="zone !== 'deck'"
+            class="zm-bulk-btn"
+            @click="bulkToDeckBottom(true)"
+          >→ Mazo (aleatorio)</button>
           <button class="zm-bulk-clear" @click="clearSelection">✕</button>
         </div>
 
@@ -252,6 +330,8 @@ const ZONES = computed(() =>
               title="Arrastra al tablero"
               @dragstart="onThumbDragStart(card, $event)"
               @dragend="onThumbDragEnd"
+              @mouseenter="onCardEnter(card, $event)"
+              @mouseleave="onCardLeave"
             >
               <img v-if="!card.faceDown && card.imageUrl" :src="card.imageUrl" class="zm-img" />
               <div v-else class="zm-back" />
@@ -286,6 +366,12 @@ const ZONES = computed(() =>
                 :disabled="z.key === zone"
                 @click="moveTo(card, z.key)"
               >{{ z.label }}</button>
+              <button
+                v-if="!isOpponent"
+                class="zm-btn zm-btn-danger"
+                title="Eliminar del juego"
+                @click="deleteCard(card)"
+              ><i class="bi bi-trash3" /></button>
             </div>
           </div>
 
@@ -300,6 +386,15 @@ const ZONES = computed(() =>
         <img :src="peekCardUrl" class="zm-peek-img" alt="" />
         <button class="zm-peek-close" @click="peekCardUrl = null">✕</button>
       </div>
+    </div>
+
+    <!-- Hover preview — mouse-follow zoom -->
+    <div
+      v-if="hoveredCard && hoveredCard.imageUrl"
+      class="zm-hover-preview"
+      :style="{ top: previewPos.top + 'px', left: previewPos.left + 'px' }"
+    >
+      <img :src="hoveredCard.imageUrl" class="zm-hover-img" alt="" />
     </div>
   </Teleport>
 </template>
@@ -430,6 +525,8 @@ const ZONES = computed(() =>
 .zm-btn.zm-btn-peek:hover { background: rgba(96,165,250,0.15); color: #93c5fd; }
 .zm-btn.zm-btn-flip { color: #fbbf24; border-color: rgba(251,191,36,0.25); }
 .zm-btn.zm-btn-flip:hover { background: rgba(251,191,36,0.15); color: #fde68a; }
+.zm-btn.zm-btn-danger { color: #f87171; border-color: rgba(239,68,68,0.3); }
+.zm-btn.zm-btn-danger:hover { background: rgba(239,68,68,0.18); color: #fecaca; }
 
 /* Peek overlay — fixed on top of everything, not teleported to a second location */
 .zm-peek-overlay {
@@ -479,4 +576,23 @@ const ZONES = computed(() =>
   transition: background 0.1s;
 }
 .zm-bulk-clear:hover { background: rgba(239,68,68,0.3); }
+
+/* Hover preview — mouse-follow zoom */
+:global(.zm-hover-preview) {
+  position: fixed;
+  z-index: 1500;
+  width: 240px;
+  height: 336px;
+  border-radius: 7px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.85);
+  border: 1px solid rgba(255,255,255,0.2);
+  pointer-events: none;
+}
+:global(.zm-hover-img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 </style>
