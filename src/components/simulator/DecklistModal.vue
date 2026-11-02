@@ -13,6 +13,37 @@ const allCards     = computed(() => game.originalDeck)
 const deck         = computed(() => allCards.value.filter(s => s.imageUrl))
 const missingCount = computed(() => allCards.value.filter(s => !s.imageUrl).length)
 
+// ── Find cards missing from the whole board (any zone, incl. attachments) ─────
+function collectLiveIds(player) {
+  const ids = new Set()
+  if (!player) return ids
+  const zones = [player.hand, player.deck, player.field, player.lifeStack, player.tributeZone, player.discardPile]
+  for (const zone of zones) {
+    for (const c of (zone || [])) {
+      ids.add(c.instanceId)
+      for (const m of (c.materials || [])) ids.add(m.instanceId)
+      for (const r of (c.resources || [])) ids.add(r.instanceId)
+    }
+  }
+  return ids
+}
+
+const liveIds       = computed(() => collectLiveIds(game.myState))
+const missingSlots  = computed(() => deck.value.filter(s => !liveIds.value.has(s.instanceId)))
+const missingIds    = computed(() => new Set(missingSlots.value.map(s => s.instanceId)))
+const restoringIds  = ref(new Set())
+
+function restoreCard(slot) {
+  if (restoringIds.value.has(slot.instanceId)) return
+  restoringIds.value = new Set([...restoringIds.value, slot.instanceId])
+  game.restoreCard(slot)
+  setTimeout(() => {
+    const next = new Set(restoringIds.value)
+    next.delete(slot.instanceId)
+    restoringIds.value = next
+  }, 1500)
+}
+
 function refreshMeta(cardId) {
   if (!cardId || refreshingIds.value.has(cardId)) return
   refreshingIds.value = new Set([...refreshingIds.value, cardId])
@@ -55,6 +86,7 @@ function updatePos(e) {
           <span class="dl-title">
             Lista de mazo — {{ deck.length }} cartas
             <span v-if="missingCount > 0" class="dl-missing-badge">{{ missingCount }} sin imagen</span>
+            <span v-if="missingSlots.length > 0" class="dl-missing-badge dl-lost-badge">{{ missingSlots.length }} perdida(s) en juego</span>
           </span>
           <button class="dl-close" @click="emit('close')">✕</button>
         </div>
@@ -70,7 +102,7 @@ function updatePos(e) {
             @mousemove="onCardMove(slot, $event)"
             @mouseleave="onCardLeave"
           >
-            <div class="dl-card-inner" :class="{ 'no-meta': !slot.cardType }">
+            <div class="dl-card-inner" :class="{ 'no-meta': !slot.cardType, missing: missingIds.has(slot.instanceId) }">
               <img v-if="slot.imageUrl" :src="slot.imageUrl" class="dl-img" alt="" draggable="false" />
               <div v-else class="dl-img dl-back" />
               <span class="dl-num">{{ i + 1 }}</span>
@@ -84,6 +116,14 @@ function updatePos(e) {
               >
                 <i class="bi bi-arrow-clockwise" />
               </button>
+              <div v-if="missingIds.has(slot.instanceId)" class="dl-lost-overlay">
+                <span class="dl-lost-text">No encontrada en el juego</span>
+                <button
+                  class="dl-restore-btn"
+                  :disabled="restoringIds.has(slot.instanceId)"
+                  @click.stop="restoreCard(slot)"
+                >Restaurar a mano</button>
+              </div>
             </div>
           </div>
         </div>
@@ -210,6 +250,49 @@ function updatePos(e) {
   border-color: rgba(234,179,8,0.6);
   box-shadow: 0 0 0 1px rgba(234,179,8,0.4) inset;
 }
+.dl-card-inner.missing {
+  border-color: rgba(239,68,68,0.7);
+  box-shadow: 0 0 0 1px rgba(239,68,68,0.5) inset;
+}
+
+.dl-lost-badge {
+  background: rgba(239,68,68,0.2);
+  color: #fca5a5;
+  border-color: rgba(239,68,68,0.4);
+}
+
+.dl-lost-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: rgba(30,6,6,0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px;
+  text-align: center;
+}
+.dl-lost-text {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #fca5a5;
+  line-height: 1.2;
+}
+.dl-restore-btn {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  background: rgba(239,68,68,0.25);
+  border: 1px solid rgba(239,68,68,0.5);
+  border-radius: 5px;
+  color: #fee2e2;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.dl-restore-btn:hover:not(:disabled) { background: rgba(239,68,68,0.45); color: #fff; }
+.dl-restore-btn:disabled { opacity: 0.5; cursor: default; }
 
 .dl-warn-badge {
   position: absolute;

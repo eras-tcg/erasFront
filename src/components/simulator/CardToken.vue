@@ -81,6 +81,12 @@ function menuViewInfo()         { showInfo.value = true; closeMenu() }
 function openDetach(type)       { detachGroupType.value = type; showDetachModal.value = true; closeMenu() }
 function menuHacerObjetivo()    { targetingSource.value = props.cardSlot.instanceId; closeMenu() }
 
+function menuRemoveCard() {
+  closeMenu()
+  if (!confirm('¿Eliminar esta carta del juego por completo? No se puede deshacer.')) return
+  game.removeCard(props.cardSlot.instanceId, props.zone, targetPlayerId.value)
+}
+
 // ── Tap / flip / view ─────────────────────────────────────────────────────────
 let tapTimer = null
 
@@ -94,7 +100,7 @@ function onClick() {
   tapTimer = setTimeout(() => {
     tapTimer = null
     game.tapCard(props.cardSlot.instanceId, props.zone, targetPlayerId.value)
-  }, 100)
+  }, 250)
 }
 
 function onDblClick() {
@@ -201,6 +207,8 @@ onUnmounted(() => {
           <button v-if="resourcesCount > 0" class="fcm-btn" @click="openDetach('resources')">Separar recursos</button>
         </template>
       </template>
+      <div class="fcm-divider" />
+      <button class="fcm-btn danger-btn" @click="menuRemoveCard">Eliminar del juego</button>
       <button class="fcm-close" @click="closeMenu">✕ Cerrar</button>
     </div>
     <div v-if="showMenu" class="fcm-backdrop" @click="closeMenu" />
@@ -345,6 +353,8 @@ onUnmounted(() => {
 :global(.fcm-btn:hover) { background: rgba(255,255,255,0.15); }
 :global(.fcm-btn.target-btn) { color: #fbbf24; }
 :global(.fcm-btn.target-btn:hover) { background: rgba(251,191,36,0.15); }
+:global(.fcm-btn.danger-btn) { color: #f87171; }
+:global(.fcm-btn.danger-btn:hover) { background: rgba(239,68,68,0.15); }
 :global(.fcm-divider) {
   height: 1px; background: rgba(255,255,255,0.08); margin: 2px 0;
 }

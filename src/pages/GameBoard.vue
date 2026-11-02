@@ -9,6 +9,7 @@ import StarterSelectModal from '@/components/simulator/StarterSelectModal.vue'
 import MulliganModal      from '@/components/simulator/MulliganModal.vue'
 import TargetingOverlay   from '@/components/simulator/TargetingOverlay.vue'
 import DecklistModal      from '@/components/simulator/DecklistModal.vue'
+import GameLogModal       from '@/components/simulator/GameLogModal.vue'
 
 const router = useRouter()
 const route  = useRoute()
@@ -20,6 +21,7 @@ const optsOpen        = ref(false)
 const showEndModal    = ref(false)
 const startGameOpen   = ref(false)
 const showDecklist    = ref(false)
+const showGameLog     = ref(false)
 
 const isLoading          = computed(() => game.connected && !game.myState)
 const isWaiting          = computed(() => game.roomStatus === 'WAITING')
@@ -66,6 +68,18 @@ const myChoice = computed(() => game.postGameChoices[auth.userId] ?? null)
 const myState       = computed(() => game.myState)
 const opponentState = computed(() => game.opponentState)
 
+// Opponent disconnected (browser closed / connection lost) — query wait vs close
+const opponentDisconnected  = computed(() => !!opponentState.value && opponentState.value.connected === false)
+const dismissedDisconnect   = ref(false)
+watch(opponentDisconnected, (val) => { if (!val) dismissedDisconnect.value = false })
+
+function onWaitDisconnect()      { dismissedDisconnect.value = true }
+function onCloseRoomDisconnect() {
+  game.closeRoom()
+  game.disconnect()
+  router.replace('/home')
+}
+
 
 onMounted(() => {
   if (!game.roomId || !game.connected) {
@@ -91,6 +105,7 @@ function copyLink() { navigator.clipboard.writeText(roomLink.value) }
 function toggleOpts() { optsOpen.value = !optsOpen.value }
 
 function onVerMazo() { optsOpen.value = false; showDecklist.value = true }
+function onVerHistorial() { optsOpen.value = false; showGameLog.value = true }
 
 function onSalir() {
   optsOpen.value = false
@@ -163,6 +178,31 @@ function goNewGame() {
       </div>
     </Teleport>
 
+    <!-- Opponent disconnected — query wait vs close room -->
+    <Teleport to="body">
+      <div v-if="opponentDisconnected && !dismissedDisconnect && !isPostGame && !isFinished" class="end-overlay">
+        <div class="end-box">
+          <h3 class="end-title">Conexión perdida con el oponente</h3>
+          <p class="end-sub">{{ opponentState?.username ?? 'El oponente' }} se ha desconectado. ¿Qué quieres hacer?</p>
+          <div class="end-btns" style="flex-direction:column;gap:0.5rem">
+            <button class="end-btn primary" @click="onWaitDisconnect">
+              <i class="bi bi-hourglass-split" /> Esperar
+            </button>
+            <button class="end-btn danger" @click="onCloseRoomDisconnect">
+              <i class="bi bi-x-octagon" /> Cerrar sala
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Persistent banner while waiting for a disconnected opponent -->
+    <div v-if="opponentDisconnected && dismissedDisconnect" class="disconnect-banner">
+      <i class="bi bi-wifi-off" />
+      <span class="disconnect-text">{{ opponentState?.username ?? 'Oponente' }} desconectado</span>
+      <button class="btn-copy" @click="dismissedDisconnect = false">Opciones</button>
+    </div>
+
     <!-- Post-game overlay -->
     <Teleport to="body">
       <div v-if="isPostGame || isFinished" class="end-overlay">
@@ -226,6 +266,20 @@ function goNewGame() {
 
     <!-- Decklist modal -->
     <DecklistModal v-if="showDecklist" @close="showDecklist = false" />
+
+    <!-- Game log modal (full history) -->
+    <GameLogModal v-if="showGameLog" @close="showGameLog = false" />
+
+    <!-- Temporary event log — top-right, auto-fading -->
+    <Teleport to="body">
+      <div class="log-feed">
+        <TransitionGroup name="log-fade" tag="div">
+          <div v-for="e in game.recentLog" :key="e.id" class="log-entry">
+            {{ e.text }}
+          </div>
+        </TransitionGroup>
+      </div>
+    </Teleport>
 
     <!-- Card reveal popup (both players see this for 3s) -->
     <div v-if="game.revealedCards.length" class="reveal-container">
@@ -303,6 +357,9 @@ function goNewGame() {
           <div class="opts-sep" />
           <button class="opts-item" @click="onVerMazo">
             <i class="bi bi-card-list" /> Ver mazo
+          </button>
+          <button class="opts-item" @click="onVerHistorial">
+            <i class="bi bi-clock-history" /> Historial
           </button>
           <div class="opts-sep" />
           <button class="opts-item" @click="onSalir">
@@ -521,6 +578,27 @@ function goNewGame() {
 }
 .btn-copy:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
+/* ── Opponent disconnected banner ──────────── */
+.disconnect-banner {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239,68,68,0.92);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.3rem 0.75rem;
+  border-radius: 0 0 8px 8px;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+.disconnect-text { line-height: 1; }
+
 /* ── End overlay ──────────────────────────── */
 .end-overlay {
   position: fixed;
@@ -713,4 +791,33 @@ function goNewGame() {
 .warn-slide-leave-active { transition: opacity 0.3s, transform 0.3s; }
 .warn-slide-enter-from  { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 .warn-slide-leave-to    { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+
+/* ── Temporary event log feed (top-right) ──── */
+:global(.log-feed) {
+  position: fixed;
+  top: 44px;
+  right: 8px;
+  z-index: 350;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-end;
+  pointer-events: none;
+  max-width: 260px;
+}
+:global(.log-entry) {
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.85);
+  background: rgba(0,0,0,0.65);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  text-align: right;
+  line-height: 1.3;
+}
+:global(.log-fade-enter-active) { transition: opacity 0.2s, transform 0.2s; }
+:global(.log-fade-leave-active) { transition: opacity 0.4s, transform 0.4s; }
+:global(.log-fade-enter-from)  { opacity: 0; transform: translateY(-6px); }
+:global(.log-fade-leave-to)    { opacity: 0; transform: translateX(20px); }
 </style>

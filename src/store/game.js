@@ -20,6 +20,8 @@ export const useGameStore = defineStore('game', {
     revealedCards:         [],
     deckWarning:           null,
     originalDeck:          [],
+    eventLog:              [],
+    recentLog:             [],
   }),
 
   getters: {
@@ -110,6 +112,25 @@ export const useGameStore = defineStore('game', {
                   this.revealedCards = this.revealedCards.filter(c => c.id !== entry.id)
                 }, 3000)
               }
+              // Log lives server-side on the room (survives leaving/rejoining the
+              // same room) — every broadcast carries the full accumulated log, so
+              // just replace our copy and flash only the newly-arrived tail into
+              // the temporary feed (skip on JOIN_ROOM/RECONNECT catch-up, which
+              // would otherwise flash the entire history at once).
+              if (Array.isArray(update.eventLog)) {
+                const prevLen = this.eventLog.length
+                const mapped = update.eventLog.map((e, i) => ({ id: `${e.ts}_${i}`, text: e.text, ts: e.ts }))
+                this.eventLog = mapped
+                const isCatchUp = ['JOIN_ROOM', 'RECONNECT'].includes(update.event)
+                if (!isCatchUp) {
+                  for (const entry of mapped.slice(prevLen)) {
+                    this.recentLog.push(entry)
+                    setTimeout(() => {
+                      this.recentLog = this.recentLog.filter(x => x.id !== entry.id)
+                    }, 6000)
+                  }
+                }
+              }
               if (update.event === 'TARGET_CARD' && update.targetedInstanceId) {
                 const auth = useAuthStore()
                 const isActor = update.actorId === auth.userId
@@ -149,6 +170,8 @@ export const useGameStore = defineStore('game', {
       this.error        = null
       this.deckWarning  = null
       this.originalDeck = []
+      this.eventLog      = []
+      this.recentLog     = []
     },
 
     sendAction(type, payload = {}) {
@@ -172,6 +195,14 @@ export const useGameStore = defineStore('game', {
     postGameChoice(choice)      { this.sendAction('POST_GAME_CHOICE', { choice })      },
     setMarker(value)            { this.sendAction('SET_MARKER', { value })              },
     forfeit()                   { this.sendAction('FORFEIT')                           },
+    closeRoom()                 { this.sendAction('CLOSE_ROOM')                        },
+    resolveEffectSummon(instanceId, fromZone, draw) { this.sendAction('EFFECT_SUMMON_RESOLVE', { instanceId, fromZone, draw }) },
+    viewDeck(position, n)       { this.sendAction('VIEW_DECK', { position, n })         },
+    viewLifeStack()             { this.sendAction('VIEW_LIFE_STACK')                   },
+    viewLifeCard(instanceId)    { this.sendAction('VIEW_LIFE_CARD', { instanceId })     },
+    bulkSendToDeckBottom(zone, instanceIds, random) {
+      this.sendAction('BULK_TO_DECK_BOTTOM', { zone, instanceIds, random })
+    },
 
     moveCard(instanceId, fromZone, toZone, x, y, toPosition, targetPlayerId = null, faceDown = null) {
       if (!targetPlayerId && this.gameState?.players) {
@@ -186,8 +217,9 @@ export const useGameStore = defineStore('game', {
               const [card] = fromList.splice(idx, 1)
               if (toZone === 'field')       { card.x = x; card.y = y }
               else                          { card.x = null; card.y = null }
-              if (toZone === 'discardPile') card.faceDown = false
+              if (toZone === 'discardPile' || toZone === 'tributeZone') card.faceDown = false
               if (toZone === 'deck')        card.faceDown = true
+              if (toZone === 'hand')        card.faceDown = false
               if (toZone !== 'field')       card.tapped = false
               if (fromZone === 'field' && toZone !== 'field') {
                 ;(card.materials ?? []).forEach(m => { m.faceDown = false; m.tapped = false; player.discardPile.push(m) })
@@ -264,6 +296,38 @@ export const useGameStore = defineStore('game', {
     },
     specialSummon({ summonedId, fromZone, summonerId, summonType }) {
       this.sendAction('SPECIAL_SUMMON', { summonedId, fromZone, summonerId, summonType })
+    },
+
+    removeCard(instanceId, zone, targetPlayerId = null) {
+      // Best-effort local cleanup too, in case the card is desynced server-side
+      // and the server can't find it to remove (e.g. after a "Card not found" bug).
+      if (!targetPlayerId && this.gameState?.players) {
+        const auth = useAuthStore()
+        const player = this.gameState.players[auth.userId]
+        if (player) {
+          const list = this._getZone(player, zone)
+          if (list) {
+            const idx = list.findIndex(c => c.instanceId === instanceId)
+            if (idx !== -1) list.splice(idx, 1)
+          }
+        }
+      }
+      this.sendAction('REMOVE_CARD', { instanceId, zone, targetPlayerId })
+    },
+    restoreCard(slot) {
+      this.sendAction('RESTORE_CARD', {
+        instanceId:        slot.instanceId,
+        cardId:            slot.cardId,
+        imageUrl:          slot.imageUrl,
+        cardName:          slot.cardName,
+        cardType:          slot.cardType,
+        strength:          slot.strength,
+        specialSummonKind: slot.specialSummonKind,
+      })
+      this.glowCard(slot.instanceId)
+    },
+    glowCard(instanceId) {
+      this.sendAction('TARGET_CARD', { targetInstanceId: instanceId, sourceInstanceId: null })
     },
   },
 })

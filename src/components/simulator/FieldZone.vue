@@ -103,7 +103,7 @@ function onDrop(e) {
 
   game.moveCard(instanceId, fromZone, 'field', x, y)
 
-  if (isCreatureSummon) effectSummonPending.value = true
+  if (isCreatureSummon) effectSummonPending.value = { instanceId, fromZone }
 }
 </script>
 

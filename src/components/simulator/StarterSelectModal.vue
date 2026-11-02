@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/login'
 const game = useGameStore()
 const auth = useAuthStore()
 
-const myDeck = computed(() => game.myState?.deck ?? [])
+const myDeck = computed(() => (game.myState?.deck ?? []).filter(c => c.starter))
 const alreadySelected = computed(() => {
   const state = game.gameState
   if (!state?.players) return false

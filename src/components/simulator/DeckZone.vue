@@ -52,16 +52,28 @@ function sendTopToLife() {
   game.moveCard(props.deck[0].instanceId, 'deck', 'lifeStack', undefined, undefined, 'top', null, true)
 }
 
+function sendTopToTribute() {
+  if (props.count === 0 || props.isOpponent) return
+  game.moveCard(props.deck[0].instanceId, 'deck', 'tributeZone', undefined, undefined, undefined, null, false)
+}
+
+function sendTopToDiscard() {
+  if (props.count === 0 || props.isOpponent) return
+  game.moveCard(props.deck[0].instanceId, 'deck', 'discardPile', undefined, undefined, undefined, null, false)
+}
+
 function openPeek() {
   const n = Math.max(1, Math.min(peekN.value || 1, props.count))
   peekN.value    = n
   showPeek.value = true
+  game.viewDeck('top', n)
 }
 
 function openPeekBottom() {
   const n = Math.max(1, Math.min(peekBottomN.value || 1, props.count))
   peekBottomN.value = n
   showPeekBot.value = true
+  game.viewDeck('bottom', n)
 }
 
 function confirmShuffle() {
@@ -163,6 +175,8 @@ function onDeckDrop(e) {
           </div>
           <button class="dc-btn" :disabled="count === 0" @click="confirmShuffle">Barajar</button>
           <button class="dc-btn" :disabled="count === 0" @click="sendTopToLife">Top → Vida</button>
+          <button class="dc-btn" :disabled="count === 0" @click="sendTopToTribute">Top → Tributo</button>
+          <button class="dc-btn" :disabled="count === 0" @click="sendTopToDiscard">Top → Descarte</button>
           <button class="dc-btn" @click="confirmIncludeDiscard">+ Descarte</button>
           <button class="dc-btn" @click="confirmIncludeTribute">+ Tributos</button>
         </div>
